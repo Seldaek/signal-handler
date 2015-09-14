@@ -1,0 +1,27 @@
+{
+    "name": "seld/signal-handler",
+    "description": "Simple unix signal handler that silently fails on windows for easy cross-platform development",
+    "keywords": ["unix", "posix", "signal", "sigint", "sigterm"],
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jordi Boggiano",
+            "email": "j.boggiano@seld.be",
+            "homepage": "http://seld.be"
+        }
+    ],
+    "require": {
+        "php": ">=5.4.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^4.8",
+        "psr/log": "^1.0"
+    },
+    "autoload": {
+        "psr-4": { "Seld\\Signal\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "Seld\\Signal\\": "tests/" }
+    }
+}

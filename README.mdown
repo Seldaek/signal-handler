@@ -1,0 +1,99 @@
+Signal Handler
+==============
+
+A simple cross-platform<sup>1</sup> signal handler.
+
+<sup>1</sup> It does not actually work on windows as the pcntl extension is not available, but
+it will silently fail to work so you can use it without caring for windows,
+and you can use signal names as strings to avoid undefined constant errors
+on windows. So it is a best-effort cross-platform that does not get in your way.
+
+[![Build Status](https://secure.travis-ci.org/Seldaek/signal-handler.png)](http://travis-ci.org/Seldaek/signal-handler)
+
+Usage
+-----
+
+### Default usage, listen to SIGTERM, SIGINT (i.e. Ctrl+C / ^C interrupts)
+
+```php
+use Seld\Signal\SignalHandler;
+
+$signal = SignalHandler::create();
+
+while (true) {
+    // do some work here ...
+
+    // exit gracefully at the end of an iteration if the process interruption was called for
+    if ($signal->isTriggered()) {
+        break;
+    }
+}
+```
+
+### Listen to custom signals and reset the handler to handle the same signal multiple times
+
+```php
+use Seld\Signal\SignalHandler;
+
+// using strings for the constant names makes sure it will work on Windows and
+// OSX even if the signal is missing on those platforms
+$signal = SignalHandler::create(['SIGHUP', 'SIGUSR1']);
+
+while (true) {
+    // do some work here ...
+
+    // reload the config when the signal was triggered
+    if ($signal->isTriggered()) {
+        $this->reloadConfiguration();
+
+        // reset the handler so next time you check isTriggered() it
+        // will be false, until SIGHUP/SIGUSR1 is signaled again
+        $signal->reset();
+    }
+}
+```
+
+### Passing in a [PSR-3 Logger](https://packagist.org/providers/psr/log-implementation) will make it log `->info('Received '.$signalName)`
+
+```php
+use Seld\Signal\SignalHandler;
+
+$signal = SignalHandler::create(null, new PSR3Logger());
+```
+
+### Passing in a callback you can react to the signal as well
+
+```php
+use Seld\Signal\SignalHandler;
+
+$signal = SignalHandler::create(['SIGINT'], function ($signal, $signalName) {
+    echo 'Received ' . $signalName . PHP_EOL;
+});
+```
+
+Installation
+------------
+
+For a quick install with Composer use:
+
+    $ composer require seld/signal-handler
+
+Requirements
+------------
+
+- PHP 5.4+
+
+Submitting bugs and feature requests
+------------------------------------
+
+Bugs and feature request are tracked on [GitHub](https://github.com/Seldaek/signal-handler/issues)
+
+Author
+------
+
+Jordi Boggiano - <j.boggiano@seld.be> - <http://twitter.com/seldaek>
+
+License
+-------
+
+signal-handler is licensed under the MIT License - see the LICENSE file for details
