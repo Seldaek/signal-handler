@@ -47,40 +47,42 @@ class SignalHandler
     {
         $handler = new static;
 
-        if (function_exists('pcntl_signal')) {
-            if (!$signals) {
-                $signals = [SIGINT, SIGTERM];
-            } elseif (!is_array($signals)) {
-                $signals = array($signals);
-            }
-            
-            // PHP 7.1 allows async signals
-            if (function_exists('pcntl_async_signals')) {
-                pcntl_async_signals(true);
-            } else {
-                declare (ticks = 1);
-            }
-            foreach ($signals as $signal) {
-                if (is_string($signal)) {
-                    // skip missing signals, for example OSX does not have all signals
-                    if (!defined($signal)) {
-                        continue;
-                    }
+        if (!function_exists('pcntl_signal')) {
+            return $handler;
+        }
 
-                    $signal = constant($signal);
+        if (!$signals) {
+            $signals = [SIGINT, SIGTERM];
+        } elseif (!is_array($signals)) {
+            $signals = [$signals];
+        }
+        
+        // PHP 7.1 allows async signals
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+        } else {
+            declare (ticks = 1);
+        }
+        foreach ($signals as $signal) {
+            if (is_string($signal)) {
+                // skip missing signals, for example OSX does not have all signals
+                if (!defined($signal)) {
+                    continue;
                 }
 
-                pcntl_signal($signal, function ($signal) use ($handler, $loggerOrCallback) {
-                    $handler->triggered = true;
-                    $signalName = self::getSignalName($signal);
-
-                    if ($loggerOrCallback instanceof LoggerInterface) {
-                        $loggerOrCallback->info('Received '.$signalName);
-                    } elseif (is_callable($loggerOrCallback)) {
-                        $loggerOrCallback($signal, $signalName);
-                    }
-                });
+                $signal = constant($signal);
             }
+
+            pcntl_signal($signal, function ($signal) use ($handler, $loggerOrCallback) {
+                $handler->triggered = true;
+                $signalName = self::getSignalName($signal);
+
+                if ($loggerOrCallback instanceof LoggerInterface) {
+                    $loggerOrCallback->info('Received '.$signalName);
+                } elseif (is_callable($loggerOrCallback)) {
+                    $loggerOrCallback($signal, $signalName);
+                }
+            });
         }
 
         return $handler;
