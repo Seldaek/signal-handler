@@ -53,8 +53,13 @@ class SignalHandler
             } elseif (!is_array($signals)) {
                 $signals = array($signals);
             }
-
-            declare (ticks = 1);
+            
+            // PHP 7.1 allows async signals
+            if (function_exists('pcntl_async_signals')) {
+                pcntl_async_signals(true);
+            } else {
+                declare (ticks = 1);
+            }
             foreach ($signals as $signal) {
                 if (is_string($signal)) {
                     // skip missing signals, for example OSX does not have all signals
