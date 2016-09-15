@@ -37,7 +37,7 @@ use Seld\Signal\SignalHandler;
 
 // using strings for the constant names makes sure it will work on Windows and
 // OSX even if the signal is missing on those platforms
-$signal = SignalHandler::create(SignalHandler::SIGHUP, SignalHandler::SIGUSR1]);
+$signal = SignalHandler::create([SignalHandler::SIGHUP, SignalHandler::SIGUSR1]);
 
 while (true) {
     // do some work here ...
