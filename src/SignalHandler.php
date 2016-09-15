@@ -245,11 +245,10 @@ class SignalHandler
             return $handler;
         }
 
-        if (!$signals) {
+        if ($signals === null) {
             $signals = [SIGINT, SIGTERM];
-        } elseif (!is_array($signals)) {
-            $signals = [$signals];
         }
+        $signals = (array) $signals;
 
         // PHP 7.1 allows async signals
         if (function_exists('pcntl_async_signals')) {

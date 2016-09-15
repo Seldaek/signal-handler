@@ -37,7 +37,7 @@ use Seld\Signal\SignalHandler;
 
 // using strings for the constant names makes sure it will work on Windows and
 // OSX even if the signal is missing on those platforms
-$signal = SignalHandler::create(['SIGHUP', 'SIGUSR1']);
+$signal = SignalHandler::create(SignalHandler::SIGHUP, SignalHandler::SIGUSR1]);
 
 while (true) {
     // do some work here ...
@@ -66,7 +66,7 @@ $signal = SignalHandler::create(null, new PSR3Logger());
 ```php
 use Seld\Signal\SignalHandler;
 
-$signal = SignalHandler::create(['SIGINT'], function ($signal, $signalName) {
+$signal = SignalHandler::create([SignalHandler::SIGINT], function ($signal, $signalName) {
     echo 'Received ' . $signalName . PHP_EOL;
 });
 ```
