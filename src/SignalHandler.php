@@ -235,7 +235,7 @@ class SignalHandler
     /**
      * @param array $signals array of signal names (more portable) or constants
      * @param LoggerInterface|callable $loggerOrCallback A PSR-3 Logger or a callback($signal, $signalName)
-     * @return SignalHandler A handler on which you can call isTriggered to know if the signal was received, and reset() to forget
+     * @return static A handler on which you can call isTriggered to know if the signal was received, and reset() to forget
      */
     public static function create($signals = null, $loggerOrCallback = null)
     {
@@ -279,6 +279,32 @@ class SignalHandler
         }
 
         return $handler;
+    }
+
+   /**
+     * Clear all previously registered signal handlers.
+     *
+     * @param  string[]|int[]|null $signals
+     * @return void
+     */
+    public function unregister($signals = null)
+    {
+        if (empty($signals)) {
+            $signals = [SIGINT, SIGTERM];
+        }
+
+        foreach ($signals as $signal) {
+            if (is_string($signal)) {
+                // skip missing signals, for example OSX does not have all signals
+                if (!defined($signal)) {
+                    continue;
+                }
+
+                $signal = constant($signal);
+            }
+
+            pcntl_signal($signal, SIG_DFL);
+        }
     }
 
     private static function getSignalName($signo)
