@@ -2,19 +2,17 @@
 
 namespace Seld\Signal;
 
-class SignalHandlerTest extends \PHPUnit_Framework_TestCase
-{
-    public function setUp()
-    {
-        if (!function_exists('pcntl_signal') || !function_exists('posix_kill')) {
-            $this->markTestSkipped('PCNTL and POSIX exts are needed for the tests to run');
-        }
-    }
+use PHPUnit\Framework\TestCase;
 
+if (!function_exists('pcntl_signal') || !function_exists('posix_kill')) {
+    throw new \RuntimeException('PCNTL and POSIX exts are needed for the tests to run');
+}
+
+class SignalHandlerTest extends TestCase
+{
     public function testLoggingAndDefault()
     {
-        $prophet = new \Prophecy\Prophet;
-        $log = $prophet->prophesize('Psr\Log\LoggerInterface');
+        $log = $this->prophesize('Psr\Log\LoggerInterface');
 
         $signal = SignalHandler::create(null, $log->reveal());
         $log->info('Received SIGINT')->shouldBeCalledTimes(1);
@@ -24,8 +22,6 @@ class SignalHandlerTest extends \PHPUnit_Framework_TestCase
         posix_kill(posix_getpid(), SIGTERM);
         posix_kill(posix_getpid(), SIGURG);
         pcntl_signal_dispatch();
-
-        $prophet->checkPredictions();
     }
 
     public function testCallbackAndCustom()

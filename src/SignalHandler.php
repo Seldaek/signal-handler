@@ -212,6 +212,9 @@ class SignalHandler
 
     const SIGBABY = 'SIGBABY';
 
+    /**
+     * @var bool
+     */
     private $triggered = false;
 
     /**
@@ -226,6 +229,8 @@ class SignalHandler
 
     /**
      * Resets the state to let a handler accept a signal again
+     *
+     * @return void
      */
     public function reset()
     {
@@ -233,12 +238,14 @@ class SignalHandler
     }
 
     /**
-     * @param array $signals array of signal names (more portable) or constants
+     * @param (string|int)[] $signals array of signal names (more portable) or constants
      * @param LoggerInterface|callable $loggerOrCallback A PSR-3 Logger or a callback($signal, $signalName)
+     * @phpstan-param LoggerInterface|(callable(int $signal, string $name): void) $loggerOrCallback
      * @return static A handler on which you can call isTriggered to know if the signal was received, and reset() to forget
      */
     public static function create($signals = null, $loggerOrCallback = null)
     {
+        /** @phpstan-ignore-next-line */
         $handler = new static;
 
         if (!function_exists('pcntl_signal')) {
@@ -307,6 +314,10 @@ class SignalHandler
         }
     }
 
+    /**
+     * @param int $signo
+     * @return string
+     */
     private static function getSignalName($signo)
     {
         static $signals = null;
