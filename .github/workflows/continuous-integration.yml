@@ -5,28 +5,27 @@ on:
   - pull_request
 
 env:
-  COMPOSER_FLAGS: "--ansi --no-interaction --no-progress --prefer-dist"
+  COMPOSER_FLAGS: "--ansi --no-interaction"
 
 jobs:
   tests:
     name: "CI"
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
+        os: [ubuntu-latest]
         php-version:
-          - "5.4"
-          - "5.5"
-          - "5.6"
-          - "7.0"
           - "7.1"
           - "7.2"
           - "7.3"
           - "7.4"
           - "8.0"
-          # disabled for now as it leads to PHPUnit installing in a very old 4.3 version due to phpspec/prophecy not allowing 8.1
-          # - "8.1"
+          - "8.1"
+        include:
+          - os: windows-latest
+            php-version: "7.4"
 
     steps:
       - name: "Checkout"
@@ -50,10 +49,7 @@ jobs:
           restore-keys: ${{ runner.os }}-composer-
 
       - name: "Install latest dependencies"
-        run: |
-          # Remove PHPStan as it requires a newer PHP
-          composer remove phpstan/phpstan phpstan/phpstan-phpunit --dev --no-update
-          composer update ${{ env.COMPOSER_FLAGS }}
+        run: "composer update ${{ env.COMPOSER_FLAGS }}"
 
       - name: "Run tests"
-        run: "composer test"
+        run: "php vendor/bin/phpunit"
