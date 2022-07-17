@@ -264,7 +264,7 @@ class SignalHandler
             }
         };
 
-        if (function_exists('sapi_windows_set_ctrl_handler') && in_array('SIGINT', $signals, true)) {
+        if (function_exists('sapi_windows_set_ctrl_handler') && PHP_SAPI === 'cli' && in_array('SIGINT', $signals, true)) {
             self::$windowsHandlers[] = $windowsHandler = function ($event) use ($handleSignal) {
                 $handleSignal(2 /* SIGINT value on linux */, 'SIGINT');
             };
@@ -306,7 +306,7 @@ class SignalHandler
             $signals = [SIGINT, SIGTERM];
         }
 
-        if (function_exists('sapi_windows_set_ctrl_handler') && in_array('SIGINT', $signals, true)) {
+        if (function_exists('sapi_windows_set_ctrl_handler') && PHP_SAPI === 'cli' && in_array('SIGINT', $signals, true)) {
             foreach (self::$windowsHandlers as $handler) {
                 sapi_windows_set_ctrl_handler($handler, false);
             }
