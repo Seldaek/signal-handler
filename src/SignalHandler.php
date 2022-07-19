@@ -16,7 +16,7 @@ use Psr\Log\LoggerInterface;
 /**
  * SignalHandler and factory
  */
-class SignalHandler
+final class SignalHandler
 {
     /**
      * The SIGHUP signal is sent to a process when its controlling terminal is closed. It was originally designed to
