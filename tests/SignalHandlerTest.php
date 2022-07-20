@@ -103,6 +103,8 @@ class SignalHandlerTest extends TestCase
 
         posix_kill(posix_getpid(), SIGHUP);
         self::assertSame('SIGHUP', $sigName);
+
+        $signal->unregister();
     }
 
     /**
@@ -121,6 +123,8 @@ class SignalHandlerTest extends TestCase
         self::assertFalse($signal->isTriggered());
         posix_kill(posix_getpid(), SIGUSR2);
         self::assertTrue($signal->isTriggered());
+
+        $signal->unregister();
     }
 
     /**
