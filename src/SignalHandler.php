@@ -284,6 +284,8 @@ final class SignalHandler
 
     /**
      * Fetches the triggered state of the handler
+     *
+     * @phpstan-impure
      */
     public function isTriggered(): bool
     {
