@@ -3,6 +3,7 @@
 namespace Seld\Signal;
 
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 
 class SignalHandlerTest extends TestCase
 {
@@ -10,13 +11,17 @@ class SignalHandlerTest extends TestCase
      * @requires extension pcntl
      * @requires extension posix
      */
-    public function testLoggingAndDefault()
+    public function testLoggingAndDefault(): void
     {
-        $log = $this->prophesize('Psr\Log\LoggerInterface');
+        $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
 
-        $signal = SignalHandler::create(null, $log->reveal());
-        $log->info('Received SIGINT')->shouldBeCalledTimes(1);
-        $log->info('Received SIGTERM')->shouldBeCalledTimes(1);
+        $signal = SignalHandler::create(null, $log);
+        $log->expects(self::exactly(2))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGINT', []],
+                ['Received SIGTERM', []]
+            );
 
         posix_kill(posix_getpid(), SIGINT);
         posix_kill(posix_getpid(), SIGTERM);
@@ -26,99 +31,239 @@ class SignalHandlerTest extends TestCase
     /**
      * @requires extension pcntl
      * @requires extension posix
+     * @requires PHP < 8.0
      */
-    public function testCallbackAndCustom()
+    public function testNoAutoGCOnPHP7(): void
     {
-        $sigNo = null;
-        $sigName = null;
+        $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
 
-        $signal = SignalHandler::create(['SIGHUP'], function ($no, $name) use (&$sigNo, &$sigName) {
-            $sigNo = $no;
-            $sigName = $name;
-        });
+        $signal = SignalHandler::create(null, $log);
+        $log->expects(self::exactly(2))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGINT', []],
+                ['Received SIGINT', []]
+            );
 
         posix_kill(posix_getpid(), SIGINT);
-        $this->assertNull($sigName);
-        $this->assertNull($sigNo);
+        unset($signal);
+        posix_kill(posix_getpid(), SIGINT);
+        SignalHandler::unregisterAll();
+        self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
+    }
 
-        posix_kill(posix_getpid(), SIGHUP);
-        $this->assertSame('SIGHUP', $sigName);
-        $this->assertSame(SIGHUP, $sigNo);
+    /**
+     * @requires extension pcntl
+     * @requires extension posix
+     * @requires PHP >= 8.0
+     */
+    public function testAutoGCOnPHP8(): void
+    {
+        $log1 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $signal1 = SignalHandler::create(null, $log1);
+        $log1->expects(self::exactly(1))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGINT', []]
+            );
+
+        $log2 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $signal2 = SignalHandler::create(null, $log2);
+        $log2->expects(self::exactly(1))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGINT', []]
+            );
+
+        posix_kill(posix_getpid(), SIGINT);
+        unset($signal2);
+        posix_kill(posix_getpid(), SIGINT);
+        unset($signal1);
+        self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
     }
 
     /**
      * @requires extension pcntl
      * @requires extension posix
      */
-    public function testTriggerResetCycle()
+    public function testCallbackAndCustom(): void
     {
-        $signal = SignalHandler::create(['SIGUSR1', 'SIGUSR2']);
+        pcntl_signal(SIGINT, function () {
+            // ignore
+        });
 
-        $this->assertFalse($signal->isTriggered());
-        posix_kill(posix_getpid(), SIGUSR1);
-        $this->assertTrue($signal->isTriggered());
-
-        $signal->reset();
-        $this->assertFalse($signal->isTriggered());
-        posix_kill(posix_getpid(), SIGUSR2);
-        $this->assertTrue($signal->isTriggered());
-    }
-
-    /**
-     * @requires OSFAMILY Windows
-     * @requires PHP >= 7.4
-     */
-    public function testLoggingAndDefaultOnWindows()
-    {
-        $log = $this->prophesize('Psr\Log\LoggerInterface');
-
-        $signal = SignalHandler::create(null, $log->reveal());
-        $log->info('Received SIGINT')->shouldBeCalledTimes(2);
-
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-    }
-
-    /**
-     * @requires OSFAMILY Windows
-     * @requires PHP >= 7.4
-     */
-    public function testCallbackAndCustomOnWindows()
-    {
-        $sigNo = null;
         $sigName = null;
 
-        $signal = SignalHandler::create(['SIGINT'], function ($no, $name) use (&$sigNo, &$sigName) {
-            $sigNo = $no;
+        $signal = SignalHandler::create([SignalHandler::SIGHUP], function ($name) use (&$sigName) {
             $sigName = $name;
         });
 
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        $this->assertSame('SIGINT', $sigName);
-        $this->assertSame(2, $sigNo);
+        posix_kill(posix_getpid(), SIGINT);
+        self::assertNull($sigName);
+
+        posix_kill(posix_getpid(), SIGHUP);
+        self::assertSame('SIGHUP', $sigName);
+    }
+
+    /**
+     * @requires extension pcntl
+     * @requires extension posix
+     */
+    public function testTriggerResetCycle(): void
+    {
+        $signal = SignalHandler::create([SignalHandler::SIGUSR1, SignalHandler::SIGUSR2]);
+
+        self::assertFalse($signal->isTriggered());
+        posix_kill(posix_getpid(), SIGUSR1);
+        self::assertTrue($signal->isTriggered());
+
+        $signal->reset();
+        self::assertFalse($signal->isTriggered());
+        posix_kill(posix_getpid(), SIGUSR2);
+        self::assertTrue($signal->isTriggered());
+    }
+
+    /**
+     * @requires extension pcntl
+     * @requires extension posix
+     */
+    public function testNestingWorks(): void
+    {
+        $log1 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $signal1 = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGHUP], $log1);
+        $log1->expects(self::exactly(2))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGHUP', []],
+                ['Received SIGINT', []]
+            );
+
+        $log2 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $signal2 = SignalHandler::create([SignalHandler::SIGINT], $log2);
+        $log2->expects(self::exactly(1))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGINT', []]
+            );
+
+        posix_kill(posix_getpid(), SIGINT);
+        posix_kill(posix_getpid(), SIGHUP);
+        $signal2->unregister();
+        unset($signal2);
+
+        self::assertNotSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
+        self::assertNotSame(SIG_DFL, pcntl_signal_get_handler(SIGHUP));
+
+        posix_kill(posix_getpid(), SIGINT);
+        $signal1->unregister();
+        unset($signal1);
+        self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
+        self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGHUP));
     }
 
     /**
      * @requires OSFAMILY Windows
      * @requires PHP >= 7.4
      */
-    public function testTriggerResetCycleOnWindows()
+    public function testLoggingAndDefaultOnWindows(): void
     {
-        $signal = SignalHandler::create(['SIGINT']);
+        $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
 
-        $this->assertFalse($signal->isTriggered());
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        $this->assertTrue($signal->isTriggered());
+        $signal = SignalHandler::create(null, $log);
+        $log->expects(self::exactly(2))
+            ->method('info')
+            ->withConsecutive(
+                ['Received SIGINT', []],
+                ['Received SIGINT', []]
+            );
+
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_C);
+
+        $signal->unregister();
+    }
+
+    /**
+     * @requires OSFAMILY Windows
+     * @requires PHP >= 7.4
+     */
+    public function testCallbackAndCustomOnWindows(): void
+    {
+        $sigName = null;
+
+        $signal = SignalHandler::create([SignalHandler::SIGBREAK], function ($name) use (&$sigName) {
+            $sigName = $name;
+        });
+
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_BREAK);
+        self::assertSame(SignalHandler::SIGBREAK, $sigName);
+
+        $signal->unregister();
+    }
+
+    /**
+     * @requires OSFAMILY Windows
+     * @requires PHP >= 7.4
+     */
+    public function testTriggerResetCycleOnWindows(): void
+    {
+        $signal = SignalHandler::create([SignalHandler::SIGINT]);
+
+        self::assertFalse($signal->isTriggered());
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_C);
+        self::assertTrue($signal->isTriggered());
 
         $signal->reset();
-        $this->assertFalse($signal->isTriggered());
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        sapi_windows_generate_ctrl_event(PHP_WINDOWS_EVENT_CTRL_BREAK);
-        $this->assertTrue($signal->isTriggered());
+        self::assertFalse($signal->isTriggered());
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_C);
+        self::assertTrue($signal->isTriggered());
+
+        $signal->unregister();
+    }
+
+    /**
+     * @requires OSFAMILY Windows
+     * @requires PHP >= 7.4
+     */
+    public function testNestingWorksOnWindows(): void
+    {
+        $signal1 = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGBREAK]);
+
+        $signal2 = SignalHandler::create([SignalHandler::SIGINT]);
+
+        self::assertFalse($signal1->isTriggered());
+        self::assertFalse($signal2->isTriggered());
+        $this->dispatchWindowsSignal($signal1, PHP_WINDOWS_EVENT_CTRL_BREAK);
+        self::assertTrue($signal1->isTriggered());
+        self::assertFalse($signal2->isTriggered());
+
+        $signal1->reset();
+
+        $this->dispatchWindowsSignal($signal2, PHP_WINDOWS_EVENT_CTRL_C);
+        // cannot assert this here as signals come in late sometimes it can be that it is triggered again from above
+        //self::assertFalse($signal1->isTriggered());
+        self::assertTrue($signal2->isTriggered());
+
+        $signal2->unregister();
+        unset($signal2);
+
+        $this->dispatchWindowsSignal($signal1, PHP_WINDOWS_EVENT_CTRL_C);
+        self::assertTrue($signal1->isTriggered());
+
+        $signal1->unregister();
+        unset($signal1);
+    }
+
+    private function dispatchWindowsSignal(SignalHandler $handler, int $signal): void
+    {
+        sapi_windows_generate_ctrl_event($signal);
+        sapi_windows_generate_ctrl_event($signal);
+        sapi_windows_generate_ctrl_event($signal);
+
+        // waits to try and get the signal handler to trigger
+        $tries = 10;
+        while (!$handler->isTriggered() && $tries-- > 0) {
+            sapi_windows_generate_ctrl_event($signal);
+            usleep(500000);
+        }
     }
 }

@@ -12,6 +12,8 @@
 namespace Seld\Signal;
 
 use Psr\Log\LoggerInterface;
+use Closure;
+use WeakReference;
 
 /**
  * SignalHandler and factory
@@ -31,6 +33,8 @@ final class SignalHandler
      * The SIGINT signal is sent to a process by its controlling terminal when a user wishes to interrupt the process.
      * This is typically initiated by pressing Ctrl-C, but on some systems, the "delete" character or "break" key can be
      * used.
+     *
+     * On Windows this is used to denote a PHP_WINDOWS_EVENT_CTRL_C
      */
     public const SIGINT = 'SIGINT';
 
@@ -213,14 +217,70 @@ final class SignalHandler
     public const SIGBABY = 'SIGBABY';
 
     /**
+     * CTRL+Break support, available on Windows only for PHP_WINDOWS_EVENT_CTRL_BREAK
+     */
+    public const SIGBREAK = 'SIGBREAK';
+
+    private const ALL_SIGNALS = [
+        self::SIGHUP, self::SIGINT, self::SIGQUIT, self::SIGILL, self::SIGTRAP, self::SIGABRT, self::SIGIOT, self::SIGBUS,
+        self::SIGFPE, self::SIGKILL, self::SIGUSR1, self::SIGUSR2, self::SIGSEGV, self::SIGPIPE, self::SIGALRM, self::SIGTERM,
+        self::SIGSTKFLT, self::SIGCLD, self::SIGCHLD, self::SIGCONT, self::SIGSTOP, self::SIGTSTP, self::SIGTTIN, self::SIGTTOU,
+        self::SIGURG, self::SIGXCPU, self::SIGXFSZ, self::SIGVTALRM, self::SIGPROF, self::SIGWINCH, self::SIGPOLL, self::SIGIO,
+        self::SIGPWR, self::SIGSYS, self::SIGBABY, self::SIGBREAK
+    ];
+
+    /**
      * @var bool
      */
     private $triggered = false;
 
     /**
-     * @var list<callable>
+     * @var list<self::SIG*>
+     * @readonly
      */
-    private static $windowsHandlers = [];
+    private $signals;
+
+    /**
+     * @var LoggerInterface|(callable(self::SIG* $name, SignalHandler $self): void)|null
+     * @readonly
+     */
+    private $loggerOrCallback;
+
+    /**
+     * @var array<int, self|WeakReference<self>>
+     */
+    private static $handlers = [];
+
+    /** @var Closure|null */
+    private static $windowsHandler = null;
+
+    /**
+     * @param array<self::SIG*> $signals
+     * @param LoggerInterface|(callable(self::SIG* $name, SignalHandler $self): void)|null $loggerOrCallback
+     */
+    private function __construct(array $signals, $loggerOrCallback)
+    {
+        if (!is_callable($loggerOrCallback) && !$loggerOrCallback instanceof LoggerInterface && $loggerOrCallback !== null) {
+            throw new \InvalidArgumentException('$loggerOrCallback must be a '.LoggerInterface::class.' instance, a callable, or null, '.(is_object($loggerOrCallback) ? get_class($loggerOrCallback) : gettype($loggerOrCallback)).' received.');
+        }
+
+        $this->signals = $signals;
+        $this->loggerOrCallback = $loggerOrCallback;
+    }
+
+    /**
+     * @param self::SIG* $signalName
+     */
+    private function trigger(string $signalName): void
+    {
+        $this->triggered = true;
+
+        if ($this->loggerOrCallback instanceof LoggerInterface) {
+            $this->loggerOrCallback->info('Received '.$signalName);
+        } elseif ($this->loggerOrCallback !== null) {
+            ($this->loggerOrCallback)($signalName, $this);
+        }
+    }
 
     /**
      * Fetches the triggered state of the handler
@@ -238,118 +298,223 @@ final class SignalHandler
         $this->triggered = false;
     }
 
-    /**
-     * @param (string|int)[] $signals array of signal names (more portable) or constants
-     * @param LoggerInterface|callable $loggerOrCallback A PSR-3 Logger or a callback($signal, $signalName)
-     * @phpstan-param LoggerInterface|(callable(int $signal, string $name): void) $loggerOrCallback
-     * @return static A handler on which you can call isTriggered to know if the signal was received, and reset() to forget
-     */
-    public static function create(?array $signals = null, $loggerOrCallback = null)
+    public function __destruct()
     {
-        /** @phpstan-ignore-next-line */
-        $handler = new static;
+        $this->unregister();
+    }
 
+    /**
+     * @param (string|int)[] $signals array of signal names (more portable, see SignalHandler::SIG*) or constants - defaults to [SIGINT, SIGTERM]
+     * @param LoggerInterface|callable $loggerOrCallback A PSR-3 Logger or a callback($signal, $signalName)
+     * @return self A handler on which you can call isTriggered to know if the signal was received, and reset() to forget
+     *
+     * @phpstan-param list<self::SIG*|int> $signals
+     * @phpstan-param LoggerInterface|(callable(self::SIG* $name, SignalHandler $self): void) $loggerOrCallback
+     */
+    public static function create(?array $signals = null, $loggerOrCallback = null): self
+    {
         if ($signals === null) {
-            $signals = ['SIGINT', 'SIGTERM'];
+            $signals = [self::SIGINT, self::SIGTERM];
         }
-        $signals = (array) $signals;
-
-        $handleSignal = function (int $signal, string $signalName) use ($handler, $loggerOrCallback) {
-            $handler->triggered = true;
-
-            if ($loggerOrCallback instanceof LoggerInterface) {
-                $loggerOrCallback->info('Received '.$signalName);
-            } elseif (is_callable($loggerOrCallback)) {
-                $loggerOrCallback($signal, $signalName);
+        $signals = array_map(function ($signal) {
+            if (is_int($signal)) {
+                return self::getSignalName($signal);
+            } elseif (!in_array($signal, self::ALL_SIGNALS, true)) {
+                throw new \InvalidArgumentException('$signals must be an array of SIG* constants or self::SIG* constants, got '.var_export($signal, true));
             }
-        };
+            return $signal;
+        }, (array) $signals);
 
-        if (function_exists('sapi_windows_set_ctrl_handler') && PHP_SAPI === 'cli' && in_array('SIGINT', $signals, true)) {
-            self::$windowsHandlers[] = $windowsHandler = function ($event) use ($handleSignal) {
-                $handleSignal(2 /* SIGINT value on linux */, 'SIGINT');
-            };
-            sapi_windows_set_ctrl_handler($windowsHandler);
+        $handler = new self($signals, $loggerOrCallback);
+
+        if (PHP_VERSION_ID >= 80000) {
+            array_unshift(self::$handlers, WeakReference::create($handler));
+        } else {
+            array_unshift(self::$handlers, $handler);
         }
 
-        if (!function_exists('pcntl_signal')) {
-            return $handler;
-        }
-
-        pcntl_async_signals(true);
-        foreach ($signals as $signal) {
-            if (is_string($signal)) {
-                // skip missing signals, for example OSX does not have all signals
-                if (!defined($signal)) {
-                    continue;
-                }
-
-                $signal = constant($signal);
+        if (function_exists('sapi_windows_set_ctrl_handler') && PHP_SAPI === 'cli' && (in_array(self::SIGINT, $signals, true) || in_array(self::SIGBREAK, $signals, true))) {
+            if (null === self::$windowsHandler) {
+                self::$windowsHandler = Closure::fromCallable([self::class, 'handleWindowsSignal']);
+                sapi_windows_set_ctrl_handler(self::$windowsHandler);
             }
+        }
 
-            pcntl_signal($signal, function ($signal) use ($handleSignal) {
-                $signalName = self::getSignalName($signal);
-                $handleSignal($signal, $signalName);
-            });
+        if (function_exists('pcntl_signal') && function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+
+            self::registerPcntlHandler($signals);
         }
 
         return $handler;
     }
 
-   /**
-     * Clear all previously registered signal handlers.
+    /**
+     * Clears the signal handler
      *
-     * @param string[]|int[]|null $signals
+     * On PHP 8+ this is not necessary and it will happen automatically on __destruct, but PHP 7 does not
+     * support weak references and thus there you need to manually do this.
+     *
+     * If another handler was registered previously to this one, it becomes active again
      */
-    public function unregister(?array $signals = null): void
+    public function unregister(): void
     {
-        if (empty($signals)) {
-            $signals = [SIGINT, SIGTERM];
-        }
+        $signals = $this->signals;
 
-        if (function_exists('sapi_windows_set_ctrl_handler') && PHP_SAPI === 'cli' && in_array('SIGINT', $signals, true)) {
-            foreach (self::$windowsHandlers as $handler) {
-                sapi_windows_set_ctrl_handler($handler, false);
+        $index = false;
+        foreach (self::$handlers as $key => $handler) {
+            if (($handler instanceof WeakReference && $handler->get() === $this) || $handler === $this) {
+                $index = $key;
+                break;
             }
-            self::$windowsHandlers = [];
         }
-
-        if (!function_exists('pcntl_signal')) {
+        if ($index === false) {
+            // guard against double-unregistration when __destruct happens
             return;
         }
 
-        foreach ($signals as $signal) {
-            if (is_string($signal)) {
+        unset(self::$handlers[$index]);
+
+        if (self::$windowsHandler !== null && (in_array(self::SIGINT, $signals, true) || in_array(self::SIGBREAK, $signals, true))) {
+            if (self::getHandlerFor(self::SIGINT) === null && self::getHandlerFor(self::SIGBREAK) === null) {
+                sapi_windows_set_ctrl_handler(self::$windowsHandler, false);
+                self::$windowsHandler = null;
+            }
+        }
+
+        if (function_exists('pcntl_signal')) {
+            foreach ($signals as $signal) {
                 // skip missing signals, for example OSX does not have all signals
                 if (!defined($signal)) {
                     continue;
                 }
 
-                $signal = constant($signal);
-            }
+                // keep listening to signals where we have a handler registered
+                if (self::getHandlerFor($signal) !== null) {
+                    continue;
+                }
 
-            pcntl_signal($signal, SIG_DFL);
+                pcntl_signal(constant($signal), SIG_DFL);
+            }
         }
     }
 
+    /**
+     * Clears all signal handlers
+     *
+     * On PHP 8+ this should not be necessary as it will happen automatically on __destruct, but PHP 7 does not
+     * support weak references and thus there you need to manually do this.
+     *
+     * This can be done to reset the global state, but ideally you should always call ->unregister() in a try/finally block to ensure it happens.
+     */
+    public static function unregisterAll(): void
+    {
+        if (self::$windowsHandler !== null) {
+            sapi_windows_set_ctrl_handler(self::$windowsHandler, false);
+            self::$windowsHandler = null;
+        }
+
+        foreach (self::$handlers as $key => $handler) {
+            if ($handler instanceof WeakReference) {
+                $handler = $handler->get();
+                if ($handler === null) {
+                    unset(self::$handlers[$key]);
+                    continue;
+                }
+            }
+            $handler->unregister();
+        }
+    }
+
+    /**
+     * @param list<self::SIG*> $signals
+     */
+    private static function registerPcntlHandler(array $signals): void
+    {
+        static $callable;
+        if ($callable === null) {
+            $callable = Closure::fromCallable([self::class, 'handlePcntlSignal']);
+        }
+        foreach ($signals as $signal) {
+            // skip missing signals, for example OSX does not have all signals
+            if (!defined($signal)) {
+                continue;
+            }
+
+            pcntl_signal(constant($signal), $callable);
+        }
+    }
+
+    private static function handleWindowsSignal(int $event): void
+    {
+        if (PHP_WINDOWS_EVENT_CTRL_C === $event) {
+            self::callHandlerFor(self::SIGINT);
+        } elseif (PHP_WINDOWS_EVENT_CTRL_BREAK === $event) {
+            self::callHandlerFor(self::SIGBREAK);
+        }
+    }
+
+    private static function handlePcntlSignal(int $signal): void
+    {
+        self::callHandlerFor(self::getSignalName($signal));
+    }
+
+    /**
+     * Calls the first handler from the top of the stack that can handle a given signal
+     *
+     * @param self::SIG* $signal
+     */
+    private static function callHandlerFor(string $signal): void
+    {
+        $handler = self::getHandlerFor($signal);
+        if ($handler !== null) {
+            $handler->trigger($signal);
+        }
+    }
+
+    /**
+     * Returns the first handler from the top of the stack that can handle a given signal
+     *
+     * @param self::SIG* $signal
+     * @return self|null
+     */
+    private static function getHandlerFor(string $signal): ?self
+    {
+        foreach (self::$handlers as $key => $handler) {
+            if ($handler instanceof WeakReference) {
+                $handler = $handler->get();
+                if ($handler === null) {
+                    unset(self::$handlers[$key]);
+                    continue;
+                }
+            }
+            if (in_array($signal, $handler->signals, true)) {
+                return $handler;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return self::SIG*
+     */
     private static function getSignalName(int $signo): string
     {
         static $signals = null;
         if ($signals === null) {
-            $reflection = new \ReflectionClass(__CLASS__);
-            $constants = $reflection->getConstants();
             $signals = [];
-            foreach ($constants as $key => $value) {
+            foreach (self::ALL_SIGNALS as $value) {
                 if (defined($value)) {
                     $signals[constant($value)] = $value;
                 }
             }
-
         }
 
         if (isset($signals[$signo])) {
             return $signals[$signo];
         }
 
-        throw new \LogicException('Unknown signal #'.$signo);
+        throw new \InvalidArgumentException('Unknown signal #'.$signo);
     }
 }
