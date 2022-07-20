@@ -230,9 +230,9 @@ final class SignalHandler
     ];
 
     /**
-     * @var bool
+     * @var self::SIG*|null
      */
-    private $triggered = false;
+    private $triggered = null;
 
     /**
      * @var list<self::SIG*>
@@ -273,7 +273,7 @@ final class SignalHandler
      */
     private function trigger(string $signalName): void
     {
-        $this->triggered = true;
+        $this->triggered = $signalName;
 
         if ($this->loggerOrCallback instanceof LoggerInterface) {
             $this->loggerOrCallback->info('Received '.$signalName);
@@ -287,7 +287,52 @@ final class SignalHandler
      */
     public function isTriggered(): bool
     {
-        return $this->triggered;
+        return $this->triggered !== null;
+    }
+
+    /**
+     * Exits the process while communicating that the handled signal was what killed the process
+     *
+     * This is different from doing exit(SIGINT), and is also different to a successful exit(0).
+     *
+     * This should only be used when you received a signal and then handled it to gracefully shutdown and are now ready to shutdown.
+     *
+     * ```
+     * $signal = SignalHandler::create([SignalHandler::SIGINT], function (string $signal, SignalHandler $handler) {
+     *     // do cleanup here..
+     *
+     *     $handler->exitWithLastSignal();
+     * });
+     *
+     * // or...
+     *
+     * $signal = SignalHandler::create([SignalHandler::SIGINT]);
+     *
+     * while ($doingThings) {
+     *     if ($signal->isTriggered()) {
+     *         $signal->exitWithLastSignal();
+     *     }
+     *
+     *     // do more things
+     * }
+     * ```
+     *
+     * @see https://www.cons.org/cracauer/sigint.html
+     * @return never
+     */
+    public function exitWithLastSignal(): void
+    {
+        $signal = $this->triggered ?? 'SIGINT';
+        $signal = defined($signal) ? constant($signal) : 2;
+
+        if (function_exists('posix_kill') && function_exists('posix_getpid')) {
+            pcntl_signal($signal, SIG_DFL);
+            posix_kill(posix_getpid(), $signal);
+        }
+
+        // just in case posix_kill above could not run
+        // not strictly correct but it's the best we can do here
+        exit(128 + $signal);
     }
 
     /**
@@ -295,7 +340,7 @@ final class SignalHandler
      */
     public function reset(): void
     {
-        $this->triggered = false;
+        $this->triggered = null;
     }
 
     public function __destruct()
