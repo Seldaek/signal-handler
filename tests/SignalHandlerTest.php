@@ -173,15 +173,12 @@ class SignalHandlerTest extends TestCase
     {
         $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
 
-        $signal = SignalHandler::create(null, $log);
-        $log->expects(self::exactly(2))
+        $signal = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGBREAK], $log);
+        $log->expects(self::atLeastOnce())
             ->method('info')
-            ->withConsecutive(
-                ['Received SIGINT', []],
-                ['Received SIGINT', []]
-            );
+            ->with(self::equalTo('Received SIGBREAK'));
 
-        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_C);
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_BREAK);
 
         $signal->unregister();
     }
@@ -210,15 +207,15 @@ class SignalHandlerTest extends TestCase
      */
     public function testTriggerResetCycleOnWindows(): void
     {
-        $signal = SignalHandler::create([SignalHandler::SIGINT]);
+        $signal = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGBREAK]);
 
         self::assertFalse($signal->isTriggered());
-        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_C);
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_BREAK);
         self::assertTrue($signal->isTriggered());
 
         $signal->reset();
         self::assertFalse($signal->isTriggered());
-        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_C);
+        $this->dispatchWindowsSignal($signal, PHP_WINDOWS_EVENT_CTRL_BREAK);
         self::assertTrue($signal->isTriggered());
 
         $signal->unregister();
@@ -232,25 +229,18 @@ class SignalHandlerTest extends TestCase
     {
         $signal1 = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGBREAK]);
 
-        $signal2 = SignalHandler::create([SignalHandler::SIGINT]);
+        $signal2 = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGBREAK]);
 
         self::assertFalse($signal1->isTriggered());
         self::assertFalse($signal2->isTriggered());
-        $this->dispatchWindowsSignal($signal1, PHP_WINDOWS_EVENT_CTRL_BREAK);
-        self::assertTrue($signal1->isTriggered());
-        self::assertFalse($signal2->isTriggered());
-
-        $signal1->reset();
-
-        $this->dispatchWindowsSignal($signal2, PHP_WINDOWS_EVENT_CTRL_C);
-        // cannot assert this here as signals come in late sometimes it can be that it is triggered again from above
-        //self::assertFalse($signal1->isTriggered());
+        $this->dispatchWindowsSignal($signal2, PHP_WINDOWS_EVENT_CTRL_BREAK);
+        self::assertFalse($signal1->isTriggered());
         self::assertTrue($signal2->isTriggered());
 
         $signal2->unregister();
         unset($signal2);
 
-        $this->dispatchWindowsSignal($signal1, PHP_WINDOWS_EVENT_CTRL_C);
+        $this->dispatchWindowsSignal($signal1, PHP_WINDOWS_EVENT_CTRL_BREAK);
         self::assertTrue($signal1->isTriggered());
 
         $signal1->unregister();
