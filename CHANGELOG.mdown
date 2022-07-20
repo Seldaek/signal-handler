@@ -1,3 +1,11 @@
+### 2.0.0 (2022-07-20)
+
+  * BC Break: The `SignalHandler` class is now final
+  * BC Break: The `SignalHandler` constructor is now private as it should anyway only be created via `::create()`
+  * Bumped PHP requirement to 7.2
+  * Added `exitWithLastSignal` method on signal handler which you should use if you want to `exit()` the process when a signal was received/handled. This hints to the parent process which signaled that the process was terminated due to the signal.
+  * Added support for nesting handlers and made sure new instances' registration/unregistration does not cause issues with previous instances. See README for more details.
+
 ### 1.3.0 (2022-02-17)
 
   * Dropped support for PHP <7.1 which allows dropping ticks for performance reasons (#6)
