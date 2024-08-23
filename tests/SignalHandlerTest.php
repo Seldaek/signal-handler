@@ -7,25 +7,38 @@ use Psr\Log\LoggerInterface;
 
 class SignalHandlerTest extends TestCase
 {
+    /** @var array<string> */
+    private $logs;
+
+    private function getLoggerMock(int $expectedCalls): LoggerInterface
+    {
+        $this->logs = [];
+
+        $logger = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $logger->expects(self::exactly($expectedCalls))
+            ->method('info')
+            ->will(self::returnCallback(function ($msg) {
+                $this->logs[] = $msg;
+            }));
+
+        return $logger;
+    }
+
     /**
      * @requires extension pcntl
      * @requires extension posix
      */
     public function testLoggingAndDefault(): void
     {
-        $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $log = $this->getLoggerMock(2);
 
         $signal = SignalHandler::create(null, $log);
-        $log->expects(self::exactly(2))
-            ->method('info')
-            ->withConsecutive(
-                ['Received SIGINT', []],
-                ['Received SIGTERM', []]
-            );
 
         posix_kill(posix_getpid(), SIGINT);
         posix_kill(posix_getpid(), SIGTERM);
         posix_kill(posix_getpid(), SIGURG);
+
+        self::assertSame(['Received SIGINT', 'Received SIGTERM'], $this->logs);
     }
 
     /**
@@ -35,21 +48,17 @@ class SignalHandlerTest extends TestCase
      */
     public function testNoAutoGCOnPHP7(): void
     {
-        $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $log = $this->getLoggerMock(2);
 
         $signal = SignalHandler::create(null, $log);
-        $log->expects(self::exactly(2))
-            ->method('info')
-            ->withConsecutive(
-                ['Received SIGINT', []],
-                ['Received SIGINT', []]
-            );
 
         posix_kill(posix_getpid(), SIGINT);
         unset($signal);
         posix_kill(posix_getpid(), SIGINT);
         SignalHandler::unregisterAll();
         self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
+
+        self::assertSame(['Received SIGINT', 'Received SIGINT'], $this->logs);
     }
 
     /**
@@ -59,27 +68,18 @@ class SignalHandlerTest extends TestCase
      */
     public function testAutoGCOnPHP8(): void
     {
-        $log1 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $log1 = $this->getLoggerMock(1);
         $signal1 = SignalHandler::create(null, $log1);
-        $log1->expects(self::exactly(1))
-            ->method('info')
-            ->withConsecutive(
-                ['Received SIGINT', []]
-            );
 
-        $log2 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $log2 = $this->getLoggerMock(1);
         $signal2 = SignalHandler::create(null, $log2);
-        $log2->expects(self::exactly(1))
-            ->method('info')
-            ->withConsecutive(
-                ['Received SIGINT', []]
-            );
 
         posix_kill(posix_getpid(), SIGINT);
         unset($signal2);
         posix_kill(posix_getpid(), SIGINT);
         unset($signal1);
         self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
+        self::assertSame(['Received SIGINT', 'Received SIGINT'], $this->logs);
     }
 
     /**
@@ -133,22 +133,11 @@ class SignalHandlerTest extends TestCase
      */
     public function testNestingWorks(): void
     {
-        $log1 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $log1 = $this->getLoggerMock(2);
         $signal1 = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGHUP], $log1);
-        $log1->expects(self::exactly(2))
-            ->method('info')
-            ->withConsecutive(
-                ['Received SIGHUP', []],
-                ['Received SIGINT', []]
-            );
 
-        $log2 = $this->getMockBuilder(LoggerInterface::class)->getMock();
+        $log2 = $this->getLoggerMock(1);
         $signal2 = SignalHandler::create([SignalHandler::SIGINT], $log2);
-        $log2->expects(self::exactly(1))
-            ->method('info')
-            ->withConsecutive(
-                ['Received SIGINT', []]
-            );
 
         posix_kill(posix_getpid(), SIGINT);
         posix_kill(posix_getpid(), SIGHUP);
@@ -163,6 +152,8 @@ class SignalHandlerTest extends TestCase
         unset($signal1);
         self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGINT));
         self::assertSame(SIG_DFL, pcntl_signal_get_handler(SIGHUP));
+
+        self::assertSame(['Received SIGINT', 'Received SIGHUP', 'Received SIGINT'], $this->logs);
     }
 
     /**
