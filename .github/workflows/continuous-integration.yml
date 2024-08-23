@@ -44,4 +44,4 @@ jobs:
           dependency-versions: highest
 
       - name: Run tests
-        run: composer test
+        run: vendor/bin/phpunit
