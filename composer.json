@@ -15,12 +15,12 @@
         "php": ">=7.2.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^7.5.20 || ^8.5.23",
-        "psr/log": "^1 || ^2 || ^3",
-        "phpstan/phpstan": "^1",
-        "phpstan/phpstan-phpunit": "^1",
-        "phpstan/phpstan-strict-rules": "^1.3",
-        "phpstan/phpstan-deprecation-rules": "^1.0"
+        "phpunit/phpunit": "^8.5.39",
+        "psr/log": "^1.1.4 || ^2 || ^3",
+        "phpstan/phpstan": "^1.11.11",
+        "phpstan/phpstan-phpunit": "^1.4",
+        "phpstan/phpstan-strict-rules": "^1.6",
+        "phpstan/phpstan-deprecation-rules": "^1.2"
     },
     "autoload": {
         "psr-4": { "Seld\\Signal\\": "src/" }
