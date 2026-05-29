@@ -261,6 +261,7 @@ final class SignalHandler
     private function __construct(array $signals, $loggerOrCallback)
     {
         if (!is_callable($loggerOrCallback) && !$loggerOrCallback instanceof LoggerInterface && $loggerOrCallback !== null) {
+            // @phpstan-ignore function.alreadyNarrowedType
             throw new \InvalidArgumentException('$loggerOrCallback must be a '.LoggerInterface::class.' instance, a callable, or null, '.(is_object($loggerOrCallback) ? get_class($loggerOrCallback) : gettype($loggerOrCallback)).' received.');
         }
 
