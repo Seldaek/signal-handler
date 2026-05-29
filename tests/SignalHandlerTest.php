@@ -164,6 +164,12 @@ class SignalHandlerTest extends TestCase
     {
         $log = $this->getMockBuilder(LoggerInterface::class)->getMock();
 
+        // The Windows CTRL handler runs in a separate thread where class autoloading
+        // is unreliable; invoke a throwaway mock here so PHPUnit's mock-invocation
+        // classes (e.g. PHPUnit\Framework\MockObject\Invocation) are loaded in the
+        // main thread first, avoiding a "Class not found" error during dispatch.
+        $this->getMockBuilder(LoggerInterface::class)->getMock()->info('warmup');
+
         $signal = SignalHandler::create([SignalHandler::SIGINT, SignalHandler::SIGBREAK], $log);
         $log->expects(self::atLeastOnce())
             ->method('info')
